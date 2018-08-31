@@ -1,0 +1,364 @@
+#!/bin/bash
+
+# Linge Ge - Spring 2018 - CS344 - Program 1
+# Matrix script that manipulates one or a set of matrices and
+# outputs the desired result.
+
+
+##global variables and constants-----------------------------------------
+
+MATRIX_FUNCTIONS="dims transpose mean add multiply"
+MATRIX_COMMAND=$1 #transfer to variable to move easily between functions
+ARUGMENT_COUNT=$(($#-1)) #matrix dimension count after command; used as argument validator later
+MATRIX_INPUT=0 #for user-input matrix on dims/transpose/mean
+MATRIX_INPUT_LEFT=0
+MATRIX_INPUT_RIGHT=0
+MATRIX_LEFT=$2 #first matrix argument
+MATRIX_RIGHT=$3 #second matrix argument
+COLUMN=0
+ROW=0
+
+##initial validator: checks for correct argument and reroute to appropriate function------------
+initialize () {
+	match=0
+	#iterates through list of known commands, return 1 if matches
+	for matrix_func in $MATRIX_FUNCTIONS; do
+		if [[ $matrix_func = $MATRIX_COMMAND ]]; then
+			match=1
+			break
+		fi
+	done
+	#check match, if none then exit script (bad command)
+	if [[ $match = 0 ]]; then
+		echo "Command not recognized. Please use dims, transpose, mean, add, or multiply" 1>&2
+		exit 1
+	fi
+
+	#route to the appropriate function via switch statement after command is validated
+	case "$MATRIX_COMMAND" in
+		'dims')
+			dims
+			;;
+		'transpose')
+			transpose
+			;;
+		'mean')
+			mean
+			;;
+		'add')
+			add
+			;;
+		'multiply')
+			multiply
+			;;
+	esac
+}
+
+
+##matrix manipulation functions----------
+
+#takes in matrix and outputs "ROWS COLS"
+dims () {
+	#throws error ane exits program if argument count > 1
+	if [[ $ARUGMENT_COUNT -gt 1 ]]; then
+		echo "Command dims must have one or less arguments" 1>&2
+		exit 1
+	#asks user to input matrix if 0
+	elif [[ $ARUGMENT_COUNT -eq 0 ]]; then
+		create_matrix
+	#one argument correctly provided, check for valid file, then load it to MATRIX_INPUT
+	else
+		verify_file $MATRIX_LEFT
+		create_matrix $MATRIX_LEFT
+	fi
+
+	#get dimensions from helper functions
+	get_row $MATRIX_INPUT
+	get_column $MATRIX_INPUT
+	
+	#outputs to stdout
+	echo -e "$ROW $COLUMN"
+
+	delete_temp_files
+}
+
+#takes in matrix and outputs a transposed form
+transpose () {
+	#throws error ane exits program if argument count > 1
+	if [[ $ARUGMENT_COUNT -gt 1 ]]; then
+		echo "Command transpose must have one or less arguments" 1>&2
+		exit 1
+	#asks user to input matrix if 0
+	elif [[ $ARUGMENT_COUNT -eq 0 ]]; then
+		create_matrix
+	#one argument correctly provided, check for valid file, then load it to MATRIX_INPUT
+	else
+		verify_file $MATRIX_LEFT
+		create_matrix $MATRIX_LEFT
+	fi
+
+	#loop to get column of original matrix, then append as row to temp file
+	touch temp_transpose_matrix_$$
+	get_column $MATRIX_INPUT
+	counter=1
+	while [[ ! counter -gt COLUMN ]]; do
+		#grab ith column, transform column to row, then store in file
+		cat $MATRIX_INPUT | cut -d $'\t' -f $counter | tr '\n' '\t' >> temp_transpose_matrix_$$
+		printf "\n" >> temp_transpose_matrix_$$
+		counter=$(($counter+1))
+	done
+
+	display_result temp_transpose_matrix_$$
+	delete_temp_files
+}
+
+#finds row vector of means in matrix
+mean () {
+	#throws error ane exits program if argument count > 1
+	if [[ $ARUGMENT_COUNT -gt 1 ]]; then
+		echo "Command mean must have one or less arguments" 1>&2
+		exit 1
+	#asks user to input matrix if 0
+	elif [[ $ARUGMENT_COUNT -eq 0 ]]; then
+		create_matrix
+	#one argument correctly provided, check for valid file, then load it to MATRIX_INPUT
+	else
+		verify_file $MATRIX_LEFT
+		create_matrix $MATRIX_LEFT
+	fi
+
+	#loop to get each column, then finds the mean of column, and appends as single value to temp file
+	touch temp_mean_vector_$$
+	get_column $MATRIX_INPUT
+	get_row $MATRIX_INPUT
+	counter=1
+	while [[ ! counter -gt COLUMN ]]; do
+		#calculate sum in each column
+		column_sum=0
+		while read value
+		do
+			column_sum=$(($column_sum+$value))
+		done < <(cat $MATRIX_INPUT | cut -d $'\t' -f $counter)
+			
+		#calculate mean with rounding
+		mean=$((($column_sum+($ROW/2)*(($column_sum>0)*2-1))/$ROW))
+		#append to mean vector
+		printf "%s\t" "$mean" >> temp_mean_vector_$$
+
+		counter=$(($counter+1))
+	done
+
+	display_result temp_mean_vector_$$
+	delete_temp_files
+}
+
+#add sum of 2 matrices
+add () {
+	#throws error ane exits program if argument not 2
+	if [[ ! $ARUGMENT_COUNT -eq 2 ]]; then
+		echo "Command add must have exactly 2 arguments" 1>&2
+		exit 1
+	#2 arguments correctly provided, check for valid file, then load it to MATRIX_INPUTs
+	else
+		verify_file $MATRIX_LEFT
+		verify_file $MATRIX_RIGHT
+		verify_dimension "add"
+
+		#create copies to work with
+		MATRIX_INPUT_LEFT="user_matrix_left_$$"
+		MATRIX_INPUT_RIGHT="user_matrix_right_$$"
+		cp $MATRIX_LEFT $MATRIX_INPUT_LEFT
+		cp $MATRIX_RIGHT $MATRIX_INPUT_RIGHT
+	fi
+
+	#sets up file, iterate through each row, iterate through each value and add, then append to file
+	touch temp_matrix_add_$$
+	get_column $MATRIX_INPUT_LEFT
+	get_row $MATRIX_INPUT_LEFT
+
+	row_count=$ROW
+	while [[ ! row_count -eq 0 ]]; do
+		#extract a line from each matrix
+		tail -n $row_count $MATRIX_INPUT_LEFT | head -n 1 > temp_left_line_$$
+		tail -n $row_count $MATRIX_INPUT_RIGHT | head -n 1 > temp_right_line_$$
+		
+		#examine each value, add, and append to temp results file
+		column_count=1
+		while [[ ! column_count -gt $COLUMN ]]; do
+			left_value=$(cut -d $'\t' -f $column_count temp_left_line_$$)
+			right_value=$(cut -d $'\t' -f $column_count temp_right_line_$$)
+			sum_value=$(($left_value+$right_value))
+
+			#append
+			printf "%s\t" "$sum_value" >> temp_matrix_add_$$
+
+			column_count=$(($column_count+1))
+		done
+		#append a newline for next line
+		printf "\n" >> temp_matrix_add_$$
+
+		row_count=$(($row_count-1))
+	done
+
+	display_result temp_matrix_add_$$
+	delete_temp_files
+}
+
+#matrix multiply 
+multiply () {
+	#throws error ane exits program if argument not 2
+	if [[ ! $ARUGMENT_COUNT -eq 2 ]]; then
+		echo "Command add must have exactly 2 arguments" 1>&2
+		exit 1
+	#2 arguments correctly provided, check for valid file, then load it to MATRIX_INPUTs
+	else
+		verify_file $MATRIX_LEFT
+		verify_file $MATRIX_RIGHT
+		verify_dimension "multiply"
+
+		#create copies to work with
+		MATRIX_INPUT_LEFT="user_matrix_left_$$"
+		MATRIX_INPUT_RIGHT="user_matrix_right_$$"
+
+		cp $MATRIX_LEFT $MATRIX_INPUT_LEFT
+		cp $MATRIX_RIGHT $MATRIX_INPUT_RIGHT
+	fi
+
+	# take row of left matrix, column of right matrix, calculate and append to temp file
+	touch temp_matrix_mult_$$
+	get_row $MATRIX_INPUT_LEFT #left row to iterate through matrices
+	get_column $MATRIX_INPUT_LEFT
+	matrix_left_column=$COLUMN
+
+	left_row_count=$ROW
+	while [[ ! left_row_count -eq 0 ]]; do
+		#extract row from left matrix
+		tail -n $left_row_count $MATRIX_INPUT_LEFT | head -n 1 > temp_left_line_$$
+
+		#iterate through each column of right matrix
+		get_column $MATRIX_INPUT_RIGHT
+		right_column_count=1
+		while [[ ! right_column_count -gt $COLUMN ]]; do
+			#extract column from right matrix, transforms to row, store to temp
+			cat $MATRIX_INPUT_RIGHT | cut -d $'\t' -f $right_column_count | tr '\n' '\t' >  temp_right_col_$$
+			cat temp_right_col_$$ | rev | cut -c 2- | rev > temp_right_line_$$ #need to remove tab otherwise breaks in some cases
+
+			#iterate through each value in both rows, and calculate the multiplcative value
+			value_count=1
+			cumulative_value=0
+			while [[ ! value_count -gt $matrix_left_column ]]; do
+				left_value=$(cut -d $'\t' -f $value_count temp_left_line_$$)
+				right_value=$(cut -d $'\t' -f $value_count temp_right_line_$$)
+				
+				mult_value=$(($left_value*$right_value))
+				cumulative_value=$(($cumulative_value+$mult_value))
+				value_count=$(($value_count+1))
+			done
+
+			#append single value to results row
+			printf "%s\t" "$cumulative_value" >> temp_matrix_mult_$$
+
+			right_column_count=$(($right_column_count+1))
+		done
+
+		#move to next row for results
+		printf "\n" >> temp_matrix_mult_$$
+
+		left_row_count=$(($left_row_count-1))
+	done
+
+	display_result temp_matrix_mult_$$
+	delete_temp_files
+}
+
+
+##helper functions----------------------
+
+#for add/mult, delete the billions of temp files created by process id
+delete_temp_files () {
+	rm -f *_$$
+}
+
+#creates a temporary matrix file to use which protects original file from being changed
+create_matrix () {
+	MATRIX_INPUT="user_matrix_$$"
+
+	#asks user input to create a file holding temporary matrix
+	if [[ $# -eq 0 ]]; then 
+		#echo "Hi, you didn't include any matrix with associated command. Please manually create one with integers and tabs as delimiter:"
+		cat > $MATRIX_INPUT
+	#has argument, use it to create copy
+	else
+		cp $1 $MATRIX_INPUT
+	fi
+}
+
+#fixes up the final result so it's a valid matrix and outputs it to stdout
+display_result () {
+	cat $1 | rev | cut -c 2- | rev | cat
+}
+
+#takes in argument and checks it points correctly to an existing, valid file
+verify_file () {
+	if [[ ! -f $1 ]] || [[ ! -r $1 ]]; then
+		echo "File $1 does not exist or unreadable." 1>&2
+		exit 1
+	fi
+}
+
+#returns row count of argument matrix
+get_row () {
+	#loops through each line and count number of rows
+	#IMPORTANT: last line does not get picked up if there's no newline at end of last line
+	#assuming that a "valid" matrix has a \n at the end of last line per assignment
+	ROW=0
+	while read matrix_row
+	do
+		ROW=$((ROW+1))
+	done < $1
+}
+
+#returns column count of argument matrix
+get_column () {
+	#converts one row of numbers to having one number on each line, then loops through to count columns
+	COLUMN=0
+	while read matrix_column
+	do
+		COLUMN=$((COLUMN+1))
+	done < <(head -n 1 $1 | tr '\t' '\n')
+}
+
+#verifies correct dimensions for add or multiply pending input
+verify_dimension () {
+	get_column $MATRIX_LEFT
+	get_row $MATRIX_LEFT
+
+	left_column=$COLUMN
+	left_row=$ROW
+
+	get_column $MATRIX_RIGHT
+	get_row $MATRIX_RIGHT
+
+	#route to appropriate dimension checker: add or multiply argument
+	case "$1" in
+		'add')
+			if [[ ! left_column -eq $COLUMN ]] || [[ ! left_row -eq $ROW ]]; then
+				echo "Matrix dimensions do not match for adding." 1>&2
+				exit 1
+			fi
+			;;
+		#left column must match right row
+		'multiply')
+			if [[ ! left_column -eq $ROW ]]; then
+				echo "Matrix dimensions not appropriate for multiplication." 1>&2
+				exit 1
+			fi
+			;;
+	esac
+}
+
+##run program
+initialize
+delete_temp_files
+exit 0
+
